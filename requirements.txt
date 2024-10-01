@@ -1,4 +1,4 @@
 ruff==0.6.8
-jsonpickle==3.2.2
+jsonpickle==3.3.0
 pytest==8.3.3
 
