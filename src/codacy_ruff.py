@@ -49,9 +49,6 @@ def readJsonFile(path):
 
 def run_ruff(files, cwd=None):
     cmd = ['python', '-m', 'ruff', 'check']
-    # ruff needs explicit fullpath
-    cmd.extend(["/home/valeriu/codacy-ruff/" + f for f in files])
-    print("Cmd call:", cmd)
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -90,7 +87,7 @@ def get_files(src_dir):
     files = []
     for filename in glob.iglob(os.path.join(src_dir, '**/*.py'),
                                             recursive=True):
-        res = os.path.relpath(filename, src_dir)
+        res = os.path.abspath(filename)
         files.append(res)
     all_files = [f for f in files if is_python3(f)]
 
@@ -122,8 +119,7 @@ def run_tool(src_dir):
 
     res = [r.split("\n") for r in res]
     res = list(itertools.chain.from_iterable(res))
-    
-    print("Run result:", res)
+
     for result in res:
         # obj_result = Result()
         if result.startswith(src_dir):
@@ -139,7 +135,8 @@ if __name__ == '__main__':
     with timeout(getTimeout(os.environ.get('TIMEOUT_SECONDS') or '')):
         try:
             results = run_tool('src')
-            print(results_to_json(results))
+            results = results_to_json(results)
+            print("Ruff results", results)
         except Exception:
             traceback.print_exc()
             sys.exit(1)
