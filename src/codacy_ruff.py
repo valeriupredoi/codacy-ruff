@@ -1,6 +1,5 @@
 import os
 import sys
-import itertools
 import json
 import jsonpickle
 import subprocess
@@ -9,8 +8,7 @@ import glob
 import signal
 from contextlib import contextmanager
 import traceback
-import django
-import re
+
 
 @contextmanager
 def timeout(time):
@@ -20,6 +18,7 @@ def timeout(time):
     signal.alarm(time)
     yield
 
+
 DEFAULT_TIMEOUT = 15 * 60
 def getTimeout(timeoutString):
     if not timeoutString.isdigit():
@@ -27,6 +26,10 @@ def getTimeout(timeoutString):
     return int(timeoutString)
 
 class Result:
+    # result need be formatted as JSON
+    # expected = '{"filename": "file.py",
+    #              "message": "message",
+    #              "patternId": "id", "line": 80}'
     def __init__(self, filename, message, patternId, line):
         self.filename = filename
         self.message = message
@@ -37,18 +40,25 @@ class Result:
     def __repr__(self):
         return self.__str__()
     def __eq__(self, o):
-        return self.filename == o.filename and self.message == o.message and self.patternId == o.patternId and self.line == o.line
+        return (self.filename == o.filename,
+                self.message == o.message,
+                self.patternId == o.patternId,
+                self.line == o.line)
 
-def toJson(obj): return jsonpickle.encode(obj, unpicklable=False)
+
+def toJson(obj):
+    return jsonpickle.encode(obj, unpicklable=False)
+
 
 def readJsonFile(path):
-    with open(path, 'r') as file:
+    with open(path, 'r', encoding='utf-8') as file:
         res = json.loads(file.read())
     return res
 
 
 def run_ruff(files, cwd=None):
-    cmd = ['python', '-m', 'ruff', 'check']
+    cmd = ['python', '-m', 'ruff', 'check', '--output-format=json']
+    cmd = cmd + files
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -59,9 +69,10 @@ def run_ruff(files, cwd=None):
 
     return result
 
+
 def is_python3(f):
     try:
-        with open(f, 'r') as stream:
+        with open(f, 'r', encoding="utf-8") as stream:
             try:
                 ast.parse(stream.read())
             except (ValueError, TypeError, UnicodeError):
@@ -76,11 +87,6 @@ def is_python3(f):
         # Shouldn't happen, but if it does, just assume there's
         # something inherently wrong with the file.
         return True
-
-
-def parse_result(output_text):
-    """Set a parser ofr ruff output."""
-    return
 
 
 def get_files(src_dir):
@@ -99,30 +105,45 @@ def chunks(lst, n):
 
 
 def run_ruff_parsed(files, cwd):
+    results = []
     res = run_ruff(files, cwd)
+    ruff_dicts = json.loads(res)
+    # a ruff_dict contains standardized keys:
+    # {  'cell': None,
+    #    'code': 'F401',
+    #    'end_location': {'column': 17, 'row': 3},
+    #    'filename': '/home/valeriu/codacy-ruff/src/codacy_ruff.py',
+    #    'fix': {'applicability': 'safe', 'edits': [{'content': '',
+    #            'end_location': {'column': 1, 'row': 4},
+    #            'location': {'column': 1, 'row': 3}}],
+    #            'message': 'Remove unused import: `itertools`'},
+    #    'location': {'column': 8, 'row': 3},
+    #    'message': '`itertools` imported but unused',
+    #    'noqa_row': 3,
+    #    'url': 'https://docs.astral.sh/ruff/rules/unused-import'
+    # }
+    for res in ruff_dicts:
+        if res['code'] != 'failure' and res['code'] != 'import-error':
+            filename = res['filename']
+            message = f"{res['message']} ({res['code']})"
+            patternId = res['url']
+            line = res['end_location']['row']
+            results.append(Result(filename, message, patternId, line))
 
-    # these need be parsed in a way
-    # res = parse_result(res)
-
-    return res
+    return results
 
 
 def run_tool(src_dir):
     files = get_files(src_dir)
     res = []
-    results = []
     files = [os.path.join(src_dir, f) for f in files]
     for chunk in chunks(files, 10):
         fres = run_ruff_parsed(chunk, src_dir)
-        fres = "".join([str(r) for r in fres])
-        res.append(fres)
+        res.extend(fres)
 
-    res = [r.split("\n") for r in res]
-    res = list(itertools.chain.from_iterable(res))
-
+    # files: go from fullpath to relpath (needed?)
     for result in res:
-        # obj_result = Result()
-        if result.startswith(src_dir):
+        if result.filename.startswith(os.path.abspath(src_dir)):
             result.filename = os.path.relpath(result.filename, src_dir)
 
     return res
@@ -131,12 +152,13 @@ def run_tool(src_dir):
 def results_to_json(results):
     return os.linesep.join([toJson(res) for res in results])
 
+
 if __name__ == '__main__':
     with timeout(getTimeout(os.environ.get('TIMEOUT_SECONDS') or '')):
         try:
             results = run_tool('src')
             results = results_to_json(results)
-            print("Ruff results", results)
+            print(results)
         except Exception:
             traceback.print_exc()
             sys.exit(1)
