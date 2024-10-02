@@ -28,4 +28,4 @@ jobs:
       - run: python src/codacy_ruff.py
       - run: pytest
       - run: docker build -t codacy-ruff:latest .
-      - run: docker run -it -v ./src codacy-ruff:latest
+      - run: docker run -it -v .:/src codacy-ruff:latest
