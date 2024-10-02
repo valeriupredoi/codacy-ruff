@@ -27,3 +27,5 @@ jobs:
       - run: pip3 install --no-cache-dir -r requirements.txt 
       - run: python src/codacy_ruff.py
       - run: pytest
+      - run: docker build -t codacy-ruff:latest .
+      - run: docker run -it -v $srcDir:/src codacy-ruff:latest
